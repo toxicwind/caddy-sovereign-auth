@@ -1,0 +1,42 @@
+name: Agentic Lens-First CI
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+env:
+  CI: true
+  LENS_ENABLED: true
+  LENS_SWARM_CONCURRENCY: 4
+jobs:
+  lens-pipeline:
+    name: Lens Perception Pipeline
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+      - run: bun install --no-save || npm install
+      - name: Discover lenses
+        run: |
+          node -e "
+          const { LensOrchestrator } = require('./lib/lens-orchestrator');
+          const orch = new LensOrchestrator();
+          orch.discover().then(lenses => {
+            console.log('Discovered:', lenses.map(l => l.name).join(', '));
+            process.exit(0);
+          });
+          "
+      - name: Run tectonic health check
+        run: |
+          node -e "
+          const { LensOrchestrator } = require('./lib/lens-orchestrator');
+          const orch = new LensOrchestrator();
+          orch.discover().then(() => {
+            return orch.analyze('tectonic', {}, { lastPush: new Date().toISOString(), repo: 'repo', ciMode: true });
+          }).then(r => {
+            console.log('Health:', r.healthScore, 'Threshold:', r.ciThreshold);
+            if (r.healthScore < r.ciThreshold) process.exit(1);
+          });
+          "
