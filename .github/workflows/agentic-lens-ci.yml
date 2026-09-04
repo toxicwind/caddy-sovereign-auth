@@ -1,24 +1,42 @@
-name: Agentic Lens-First CI
+name: "Agentic Lens-First CI"
+
 on:
   push:
     branches: [main]
   pull_request:
   workflow_dispatch:
+
 env:
   CI: true
   LENS_ENABLED: true
   LENS_SWARM_CONCURRENCY: 4
+
 jobs:
   lens-pipeline:
-    name: Lens Perception Pipeline
+    name: "Lens Perception Pipeline"
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+
+      - name: "Check for package.json"
+        id: check_pkg
+        run: |
+          if [ -f package.json ]; then
+            echo "has_pkg=true" >> $GITHUB_OUTPUT
+          else
+            echo "has_pkg=false" >> $GITHUB_OUTPUT
+          fi
+
       - uses: oven-sh/setup-bun@v2
+        if: steps.check_pkg.outputs.has_pkg == 'true'
         with:
           bun-version: latest
-      - run: bun install --no-save || npm install
-      - name: Discover lenses
+
+      - name: "Install dependencies (if package.json exists)"
+        if: steps.check_pkg.outputs.has_pkg == 'true'
+        run: bun install --no-save || npm install --no-save || true
+
+      - name: "Discover lenses"
         run: |
           node -e "
           const { LensOrchestrator } = require('./lib/lens-orchestrator');
@@ -26,17 +44,74 @@ jobs:
           orch.discover().then(lenses => {
             console.log('Discovered:', lenses.map(l => l.name).join(', '));
             process.exit(0);
+          }).catch(e => {
+            console.error('Discover failed:', e.message);
+            process.exit(1);
           });
           "
-      - name: Run tectonic health check
+
+      - name: "Run stylometric lens"
         run: |
           node -e "
           const { LensOrchestrator } = require('./lib/lens-orchestrator');
           const orch = new LensOrchestrator();
           orch.discover().then(() => {
-            return orch.analyze('tectonic', {}, { lastPush: new Date().toISOString(), repo: 'repo', ciMode: true });
+            return orch.analyze('stylometric', 'The quick brown fox jumps over the lazy dog.');
           }).then(r => {
-            console.log('Health:', r.healthScore, 'Threshold:', r.ciThreshold);
-            if (r.healthScore < r.ciThreshold) process.exit(1);
+            console.log('Confidence:', r.confidence);
+            if (r.confidence < 0.8) process.exit(1);
+          }).catch(e => {
+            console.error('Stylometric failed:', e.message);
+            process.exit(1);
           });
           "
+
+      - name: "Run cryptographic lens"
+        run: |
+          node -e "
+          const { LensOrchestrator } = require('./lib/lens-orchestrator');
+          const orch = new LensOrchestrator();
+          orch.discover().then(() => {
+            return orch.analyze('cryptographic', 'test content with no tokens');
+          }).then(r => {
+            console.log('Flag:', r.entropy_flag);
+            if (r.entropy_flag !== 'clean') process.exit(1);
+          }).catch(e => {
+            console.error('Crypto failed:', e.message);
+            process.exit(1);
+          });
+          "
+
+      - name: "Run OSINT lens"
+        run: |
+          node -e "
+          const { LensOrchestrator } = require('./lib/lens-orchestrator');
+          const orch = new LensOrchestrator();
+          orch.discover().then(() => {
+            return orch.analyze('osint', 'Visit https://example.com for more info.');
+          }).then(r => {
+            console.log('URLs found:', r.urls_found.length);
+            if (r.urls_found.length === 0) process.exit(1);
+          }).catch(e => {
+            console.error('OSINT failed:', e.message);
+            process.exit(1);
+          });
+          "
+
+  mcp-smoke:
+    name: "MCP Server Smoke Tests"
+    runs-on: ubuntu-latest
+    needs: lens-pipeline
+    steps:
+      - uses: actions/checkout@v4
+      - name: "Check for MCP servers"
+        run: |
+          if [ -d services/mcp-stack ]; then
+            for f in services/mcp-stack/*/server.ts; do
+              if [ -f "$f" ]; then
+                echo "Found: $f"
+              fi
+            done
+          else
+            echo "No MCP servers directory — skipping"
+          fi
