@@ -28,5 +28,4 @@ jobs:
               console.error('WARNING: Health score ' + r.healthScore + ' below threshold ' + threshold);
               process.exit(1);
             }
-          });
-          
+          });"
